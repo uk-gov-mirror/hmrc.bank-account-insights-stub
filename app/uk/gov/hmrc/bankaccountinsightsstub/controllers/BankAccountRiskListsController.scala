@@ -16,13 +16,13 @@
 
 package uk.gov.hmrc.bankaccountinsightsstub.controllers
 
-import play.api.libs.json._
+import play.api.libs.json.*
 import play.api.mvc.{Action, BaseController, ControllerComponents}
-import uk.gov.hmrc.bankaccountinsightsstub.model.BankAccountDetails
-import uk.gov.hmrc.bankaccountinsightsstub.model.BankAccountDetails.implicits._
+import uk.gov.hmrc.bankaccountinsightsstub.model.BankAccountDetails.implicits.*
+import uk.gov.hmrc.bankaccountinsightsstub.model.{BankAccountDetails, BankAccountInsightsResponse}
 
+import java.util.UUID
 import javax.inject.Inject
-import scala.concurrent.Future
 
 class BankAccountRiskListsController @Inject() (val controllerComponents: ControllerComponents) extends BaseController {
 
@@ -49,18 +49,23 @@ class BankAccountRiskListsController @Inject() (val controllerComponents: Contro
     "881692,50225300"
   )
 
-  def isBankAccountOnRejectList: Action[JsValue] = Action.async(parse.json) { req =>
-    val bankAccountOnRejectList = Json.fromJson[BankAccountDetails](req.body)
-    Future.successful(
-      bankAccountOnRejectList.fold(
-        _ => BadRequest("""{"message": "malformed request payload}"""),
+  def isBankAccountOnRejectList: Action[JsValue] = Action(parse.json) { req =>
+    val correlationId = req.headers.get("CorrelationId").getOrElse(UUID.randomUUID().toString)
+    Json
+      .fromJson[BankAccountDetails](req.body)
+      .fold(
+        errors => BadRequest(simplifyJsonErrors(errors)),
         valid =>
-          if (watchList.contains(s"${valid.sortCode},${valid.accountNumber}")) {
-            Ok("""{"result": true}""")
+          Ok(Json.toJson(if (watchList.contains(s"${valid.sortCode},${valid.accountNumber}")) {
+            BankAccountInsightsResponse.onWatchlistResponse(correlationId)
           } else {
-            Ok("""{"result": false}""")
-          }
+            BankAccountInsightsResponse.notOnWatchlistResponse(correlationId)
+          }))
       )
-    )
   }
+
+  def simplifyJsonErrors(errors: collection.Seq[(JsPath, collection.Seq[JsonValidationError])]): JsObject =
+    errors.foldLeft(Json.obj()) { case (obj, (path, errorsForPath)) =>
+      obj ++ Json.obj(path.toString -> errorsForPath.map(_.message))
+    }
 }
